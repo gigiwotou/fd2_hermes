@@ -5,6 +5,7 @@ game/
 
 # 调试脚本和临时文件
 
+
 # 生成的动画和图像
 docs/afm_animations/
 
@@ -19,6 +20,10 @@ __pycache__/
 .Python
 .env
 .venv/
+
+# Rust
+target/
+Cargo.lock
 
 # IDE
 .vscode/

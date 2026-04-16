@@ -1,6 +1,6 @@
 use minifb::{Key, Window, WindowOptions, MouseButton};
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::Read;
 
 const SCREEN_WIDTH: usize = 900;
 const SCREEN_HEIGHT: usize = 520;
@@ -455,170 +455,37 @@ fn draw_text(buffer: &mut [u32], text: &str, x: usize, y: usize, color: u32) {
 }
 
 fn save_animation_as_gif(animation: &(Vec<Vec<u8>>, Vec<[u8; 768]>), filename: &str) -> std::io::Result<()> {
+    use image::{Frame, ImageBuffer, Rgba};
+    use image::codecs::gif::{GifEncoder, Repeat};
+    
     let (frames, palettes) = animation;
     if frames.is_empty() {
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "No frames"));
     }
 
-    let mut file = File::create(filename)?;
-    
-    // GIF89a header
-    file.write_all(b"GIF89a")?;
-    
-    // Logical Screen Descriptor
-    file.write_all(&(ANI_WIDTH as u16).to_le_bytes())?;
-    file.write_all(&(ANI_HEIGHT as u16).to_le_bytes())?;
-    file.write_all(&[0xF7])?;
-    file.write_all(&[0])?;
-    file.write_all(&[0])?;
+    let mut gif_encoder = GifEncoder::new(File::create(filename)?);
+    gif_encoder.set_repeat(Repeat::Infinite).ok();
 
-    // Global Color Table
-    for i in 0..256 {
-        let idx = i * 3;
-        let r = (palettes[0][idx] as u8).wrapping_mul(4).min(255);
-        let g = (palettes[0][idx + 1] as u8).wrapping_mul(4).min(255);
-        let b = (palettes[0][idx + 2] as u8).wrapping_mul(4).min(255);
-        file.write_all(&[r, g, b])?;
-    }
+    for (frame_data, palette) in frames.iter().zip(palettes.iter()) {
+        let mut img_buffer: ImageBuffer<Rgba<u8>, Vec<u8>> = 
+            ImageBuffer::new(ANI_WIDTH as u32, ANI_HEIGHT as u32);
 
-    // Netscape Extension
-    file.write_all(&[0x21, 0xFF, 0x0B])?;
-    file.write_all(b"NETSCAPE2.0")?;
-    file.write_all(&[0x03, 0x01, 0x00, 0x00, 0x00])?;
-
-    let frame_delay = 10u16;
-
-    for frame in frames.iter() {
-        // Graphic Control Extension
-        file.write_all(&[0x21, 0xF9, 0x04])?;
-        file.write_all(&[0x04])?;
-        file.write_all(&frame_delay.to_le_bytes())?;
-        file.write_all(&[0x00, 0x00])?;
-
-        // Image Descriptor
-        file.write_all(&[0x2C])?;
-        file.write_all(&[0u8; 8])?;
-        
-        // LZW Minimum Code Size
-        file.write_all(&[8])?;
-
-        // LZW encode
-        let compressed = lzw_encode(frame);
-        
-        let mut pos = 0;
-        while pos < compressed.len() {
-            let chunk_size = std::cmp::min(255, compressed.len() - pos);
-            file.write_all(&[chunk_size as u8])?;
-            file.write_all(&compressed[pos..pos + chunk_size])?;
-            pos += chunk_size;
+        for (x, y, pixel) in img_buffer.enumerate_pixels_mut() {
+            let idx = (y as usize) * ANI_WIDTH + (x as usize);
+            let color_idx = frame_data[idx] as usize * 3;
+            
+            let r = (palette[color_idx] as u8).wrapping_mul(4).min(255);
+            let g = (palette[color_idx + 1] as u8).wrapping_mul(4).min(255);
+            let b = (palette[color_idx + 2] as u8).wrapping_mul(4).min(255);
+            
+            *pixel = Rgba([r, g, b, 255]);
         }
-        file.write_all(&[0x00])?;
+
+        let frame = Frame::from_parts(img_buffer, 0, 0, image::Delay::from_numer_denom_ms(100, 1));
+        gif_encoder.encode_frame(frame).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
     }
 
-    file.write_all(&[0x3B])?;
     Ok(())
-}
-
-// LZW 编码器状态
-struct LzwEncoder {
-    bit_buffer: u32,
-    bit_count: u8,
-    output: Vec<u8>,
-    code_size: u8,
-    next_code: u16,
-    max_code: u16,
-    clear_code: u16,
-    end_code: u16,
-}
-
-impl LzwEncoder {
-    fn new() -> Self {
-        LzwEncoder {
-            bit_buffer: 0,
-            bit_count: 0,
-            output: Vec::new(),
-            code_size: 9,
-            next_code: 258,
-            max_code: 511,
-            clear_code: 256,
-            end_code: 257,
-        }
-    }
-
-    fn write_code(&mut self, code: u16) {
-        self.bit_buffer |= (code as u32) << self.bit_count;
-        self.bit_count += self.code_size;
-        
-        while self.bit_count >= 8 {
-            self.output.push((self.bit_buffer & 0xFF) as u8);
-            self.bit_buffer >>= 8;
-            self.bit_count -= 8;
-        }
-    }
-
-    fn flush(&mut self) {
-        if self.bit_count > 0 {
-            self.output.push((self.bit_buffer & 0xFF) as u8);
-        }
-    }
-
-    fn bump_code_size(&mut self) {
-        if self.next_code > self.max_code && self.code_size < 12 {
-            self.code_size += 1;
-            self.max_code = (1 << self.code_size) - 1;
-        }
-    }
-}
-
-fn lzw_encode(data: &[u8]) -> Vec<u8> {
-    use std::collections::HashMap;
-    
-    let mut encoder = LzwEncoder::new();
-    let mut code_table: HashMap<Vec<u8>, u16> = HashMap::new();
-    
-    for i in 0..256 {
-        code_table.insert(vec![i as u8], i as u16);
-    }
-    
-    encoder.write_code(encoder.clear_code);
-    
-    if data.is_empty() {
-        encoder.write_code(encoder.end_code);
-        encoder.flush();
-        return encoder.output;
-    }
-    
-    let mut buffer = vec![data[0]];
-    
-    for &byte in &data[1..] {
-        let mut test_buffer = buffer.clone();
-        test_buffer.push(byte);
-        
-        if code_table.contains_key(&test_buffer) {
-            buffer = test_buffer;
-        } else {
-            if let Some(&code) = code_table.get(&buffer) {
-                encoder.write_code(code);
-            }
-            
-            if encoder.next_code < 4096 {
-                code_table.insert(test_buffer, encoder.next_code);
-                encoder.next_code += 1;
-                encoder.bump_code_size();
-            }
-            
-            buffer = vec![byte];
-        }
-    }
-    
-    if let Some(&code) = code_table.get(&buffer) {
-        encoder.write_code(code);
-    }
-    
-    encoder.write_code(encoder.end_code);
-    encoder.flush();
-    
-    encoder.output
 }
 
 fn parse_afm_index(data: &[u8]) -> Vec<usize> {

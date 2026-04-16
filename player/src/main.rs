@@ -2,8 +2,8 @@ use minifb::{Key, Window, WindowOptions, MouseButton};
 use std::fs::File;
 use std::io::{Read, Write};
 
-const SCREEN_WIDTH: usize = 640;
-const SCREEN_HEIGHT: usize = 480;
+const SCREEN_WIDTH: usize = 900;
+const SCREEN_HEIGHT: usize = 520;
 const ANI_WIDTH: usize = 320;
 const ANI_HEIGHT: usize = 200;
 const BUFFER_SIZE: usize = ANI_WIDTH * ANI_HEIGHT;
@@ -277,7 +277,7 @@ fn draw_ui(
     }
 
     // 绘制动画预览区域
-    let preview_x = 300;
+    let preview_x = 290;
     let preview_y = 40;
     let preview_scale = 2;
 

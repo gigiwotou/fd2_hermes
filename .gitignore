@@ -1,37 +1,15 @@
 # 游戏原始数据文件 (二进制大文件)
-game/*.DAT
-game/*.EXE
-game/*.COM
-game/*.BIN
-game/*.DIG
-game/*.MDI
-game/*.BNK
-game/*.AD
-game/*.OPL
-game/*.ICO
-game/*.B24
-game/*.SAV
-game/*.TMP
-game/*.LST
+game/
 
 # 保留文本文件
-!game/readme.txt
-!game/path.ini
 
 # 调试脚本和临时文件
-game/debug_*
-game/fdother_*
-game/start_debug.sh
-game/track_*
-game/debuginit.bat
 
 # 生成的动画和图像
-docs/afm_animations/*.gif
-docs/afm_animations/*.png
-docs/afm_animations/*.jpg
+docs/afm_animations/
 
 # 保留目录结构
-!docs/afm_animations/.gitkeep
+
 
 # Python
 __pycache__/

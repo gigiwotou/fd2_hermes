@@ -1,14 +1,11 @@
-use minifb::{Key, Window, WindowOptions, MouseButton};
+use minifb::{Key, Window, WindowOptions, Scale};
 use std::fs::File;
 use std::io::Read;
 
-const SCREEN_WIDTH: usize = 900;
-const SCREEN_HEIGHT: usize = 520;
 const ANI_WIDTH: usize = 320;
 const ANI_HEIGHT: usize = 200;
 const BUFFER_SIZE: usize = ANI_WIDTH * ANI_HEIGHT;
 
-// 动画名称
 const ANIMATION_NAMES: &[&str] = &[
     "AFM 0 - Opening",
     "AFM 1 - Battle",
@@ -23,38 +20,60 @@ const ANIMATION_NAMES: &[&str] = &[
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let ani_path = if args.len() > 1 {
+    
+    // 解析缩放参数
+    let scale_arg = args.iter().find(|a| a.starts_with("--scale=") || a.starts_with("-s="));
+    let scale = match scale_arg {
+        Some(arg) => {
+            let val = arg.split('=').nth(1).unwrap_or("2");
+            match val {
+                "1" => Scale::X1,
+                "2" => Scale::X2,
+                "4" => Scale::X4,
+                "f" | "fit" => Scale::FitScreen,
+                _ => Scale::X2,
+            }
+        }
+        None => Scale::X2, // 默认 2x
+    };
+
+    // 检查是否显示帮助
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        println!("FD2 Animation Player");
+        println!();
+        println!("Usage: fd2_player [ANI.DAT] [OPTIONS]");
+        println!();
+        println!("Options:");
+        println!("  -s=N, --scale=N  Set scale: 1, 2, 4, or fit");
+        println!("                   1 = 320x200 (original)");
+        println!("                   2 = 640x400 (default)");
+        println!("                   4 = 1280x800");
+        println!("                   fit = auto-fit to screen");
+        println!("  -h, --help       Show this help");
+        println!();
+        println!("Controls:");
+        println!("  1-9       Select animation");
+        println!("  Left/Right Navigate");
+        println!("  S         Save as GIF");
+        println!("  ESC       Exit");
+        return;
+    }
+
+    let ani_path = if args.len() > 1 && !args[1].starts_with('-') {
         args[1].clone()
     } else {
-        // 只从同目录寻找 ANI.DAT
         if std::path::Path::new("ANI.DAT").exists() {
             "ANI.DAT".to_string()
         } else {
-            // 显示图形化错误消息
-            let mut error_window = Window::new(
-                "Error - ANI.DAT not found",
-                400,
-                150,
-                WindowOptions::default(),
-            ).unwrap();
-            
-            let mut buffer = vec![0x303030u32; 400 * 150];
-            draw_text(&mut buffer, "Error: ANI.DAT not found!", 80, 40, 0xFF4444);
-            draw_text(&mut buffer, "Please copy ANI.DAT to", 80, 70, 0xFFFFFF);
-            draw_text(&mut buffer, "the same directory as", 80, 90, 0xFFFFFF);
-            draw_text(&mut buffer, "fd2_player executable", 80, 110, 0xFFFFFF);
-            
-            while error_window.is_open() && !error_window.is_key_down(Key::Escape) {
-                error_window.update_with_buffer(&buffer, 400, 150).unwrap();
-                std::thread::sleep(std::time::Duration::from_millis(50));
-            }
+            eprintln!("Error: ANI.DAT not found!");
+            eprintln!("Usage: fd2_player [ANI.DAT path] [--scale=1|2|4|fit]");
             return;
         }
     };
 
     eprintln!("Loading: {}", ani_path);
+    eprintln!("Scale: {:?}", scale);
 
-    // 读取 ANI.DAT
     let mut file = match File::open(&ani_path) {
         Ok(f) => f,
         Err(_) => {
@@ -66,11 +85,9 @@ fn main() {
     let mut data = Vec::new();
     file.read_to_end(&mut data).unwrap();
 
-    // 解析 AFM 索引
     let afm_offsets = parse_afm_index(&data);
     println!("Found {} AFM animations", afm_offsets.len());
 
-    // 解码所有 AFM
     let mut all_animations: Vec<(Vec<Vec<u8>>, Vec<[u8; 768]>)> = Vec::new();
     
     for (idx, &offset) in afm_offsets.iter().enumerate() {
@@ -85,13 +102,14 @@ fn main() {
         return;
     }
 
-    // 创建窗口
+    // 创建窗口，使用指定的缩放
     let mut window = Window::new(
-        "FD2 Animation Player - Click to select",
-        SCREEN_WIDTH,
-        SCREEN_HEIGHT,
+        "FD2 Player",
+        ANI_WIDTH,
+        ANI_HEIGHT,
         WindowOptions {
-            scale: minifb::Scale::X1,
+            scale: scale,
+            resize: true,
             ..WindowOptions::default()
         },
     )
@@ -100,97 +118,18 @@ fn main() {
     let mut current_afm = 0;
     let mut current_frame = 0;
     let mut frame_counter = 0;
-    let mut buffer = vec![0u32; SCREEN_WIDTH * SCREEN_HEIGHT];
-    let mut hovered_item: Option<usize> = None;
-    let mut hovered_save_btn: Option<usize> = None;
+    let mut buffer = vec![0u32; BUFFER_SIZE];
     let mut status_message = String::new();
     let mut status_counter = 0u32;
-    let mut last_click_time = 0u64;
-    let mut click_count = 0;
+
+    println!("\nControls:");
+    println!("  [1-9]        : Select animation");
+    println!("  [Left/Right] : Navigate");
+    println!("  [S]          : Save as GIF");
+    println!("  [ESC]        : Exit");
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
-        // 获取鼠标位置
-        let mouse_pos = window.get_mouse_pos(minifb::MouseMode::Clamp).unwrap_or((0.0, 0.0));
-        let mx = mouse_pos.0 as usize;
-        let my = mouse_pos.1 as usize;
-
-        // 检测悬停项
-        hovered_item = None;
-        hovered_save_btn = None;
-        
-        let list_x = 10;
-        let list_y = 40;
-        let item_height = 28;
-        
-        for i in 0..all_animations.len().min(9) {
-            let y = list_y + i * item_height;
-            if mx >= list_x && mx < list_x + 200 && my >= y && my < y + item_height {
-                hovered_item = Some(i);
-            }
-            let btn_x = list_x + 205;
-            if mx >= btn_x && mx < btn_x + 60 && my >= y && my < y + item_height {
-                hovered_save_btn = Some(i);
-            }
-        }
-
-        // 处理鼠标点击
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
-        
-        if window.get_mouse_down(MouseButton::Left) {
-            if now - last_click_time < 300 {
-                click_count += 1;
-            } else {
-                click_count = 1;
-            }
-            last_click_time = now;
-
-            if click_count >= 2 {
-                if let Some(idx) = hovered_item {
-                    current_afm = idx;
-                    current_frame = 0;
-                    frame_counter = 0;
-                    status_message = format!("Selected: {}", ANIMATION_NAMES.get(idx).unwrap_or(&"Unknown"));
-                    status_counter = 60;
-                }
-            }
-            
-            if let Some(idx) = hovered_save_btn {
-                if idx < all_animations.len() {
-                    let name = ANIMATION_NAMES.get(idx).unwrap_or(&"unknown");
-                    let filename = format!("{}.gif", name.split(" - ").next().unwrap_or("animation"));
-                    match save_animation_as_gif(&all_animations[idx], &filename) {
-                        Ok(_) => {
-                            status_message = format!("Saved: {}", filename);
-                            status_counter = 120;
-                        }
-                        Err(e) => {
-                            status_message = format!("Save failed: {}", e);
-                            status_counter = 120;
-                        }
-                    }
-                }
-            }
-        }
-
-        // 键盘控制
-        if window.is_key_pressed(Key::Left, minifb::KeyRepeat::No) {
-            if current_afm > 0 {
-                current_afm -= 1;
-                current_frame = 0;
-                frame_counter = 0;
-            }
-        }
-        if window.is_key_pressed(Key::Right, minifb::KeyRepeat::No) {
-            if current_afm < all_animations.len() - 1 {
-                current_afm += 1;
-                current_frame = 0;
-                frame_counter = 0;
-            }
-        }
-
+        // 动画选择
         let num_keys = [Key::Key1, Key::Key2, Key::Key3, Key::Key4, Key::Key5,
                        Key::Key6, Key::Key7, Key::Key8, Key::Key9];
         for (i, &key) in num_keys.iter().enumerate() {
@@ -199,10 +138,33 @@ fn main() {
                     current_afm = i;
                     current_frame = 0;
                     frame_counter = 0;
+                    status_message = format!("{}", ANIMATION_NAMES[i]);
+                    status_counter = 60;
                 }
             }
         }
 
+        // 左右切换
+        if window.is_key_pressed(Key::Left, minifb::KeyRepeat::No) {
+            if current_afm > 0 {
+                current_afm -= 1;
+                current_frame = 0;
+                frame_counter = 0;
+                status_message = format!("{}", ANIMATION_NAMES[current_afm]);
+                status_counter = 60;
+            }
+        }
+        if window.is_key_pressed(Key::Right, minifb::KeyRepeat::No) {
+            if current_afm < all_animations.len() - 1 {
+                current_afm += 1;
+                current_frame = 0;
+                frame_counter = 0;
+                status_message = format!("{}", ANIMATION_NAMES[current_afm]);
+                status_counter = 60;
+            }
+        }
+
+        // 保存GIF
         if window.is_key_pressed(Key::S, minifb::KeyRepeat::No) {
             let name = ANIMATION_NAMES.get(current_afm).unwrap_or(&"animation");
             let filename = format!("{}.gif", name.split(" - ").next().unwrap_or("animation"));
@@ -210,14 +172,16 @@ fn main() {
                 Ok(_) => {
                     status_message = format!("Saved: {}", filename);
                     status_counter = 120;
+                    println!("Saved: {}", filename);
                 }
                 Err(e) => {
-                    status_message = format!("Save failed: {}", e);
+                    status_message = format!("Error: {}", e);
                     status_counter = 120;
                 }
             }
         }
 
+        // 状态计数器
         if status_counter > 0 {
             status_counter -= 1;
         }
@@ -230,227 +194,121 @@ fn main() {
                 frame_counter = 0;
                 current_frame = (current_frame + 1) % frames.len();
             }
+
+            // 更新窗口标题
+            let title = format!(
+                "{} - Frame {}/{} | [ESC] Exit",
+                ANIMATION_NAMES[current_afm],
+                current_frame + 1,
+                frames.len()
+            );
+            window.set_title(&title);
+
+            // 绘制帧
+            render_frame(&mut buffer, &frames[current_frame], &palettes[current_frame]);
+
+            // 绘制状态消息
+            if status_counter > 0 && !status_message.is_empty() {
+                draw_status_bar(&mut buffer, &status_message);
+            }
+
+            window.update_with_buffer(&buffer, ANI_WIDTH, ANI_HEIGHT).unwrap();
+        } else {
+            window.update();
         }
 
-        // 绘制UI
-        draw_ui(
-            &mut buffer,
-            current_afm,
-            current_frame,
-            frames.len(),
-            hovered_item,
-            hovered_save_btn,
-            &status_message,
-            status_counter > 0,
-            &frames[current_frame],
-            &palettes[current_frame],
-        );
-
-        window.update_with_buffer(&buffer, SCREEN_WIDTH, SCREEN_HEIGHT).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(33));
     }
 }
 
-fn draw_ui(
-    buffer: &mut [u32],
-    current_afm: usize,
-    current_frame: usize,
-    total_frames: usize,
-    hovered_item: Option<usize>,
-    hovered_save_btn: Option<usize>,
-    status_message: &str,
-    show_status: bool,
-    frame_data: &[u8],
-    palette: &[u8; 768],
-) {
-    // 清空背景
-    for pixel in buffer.iter_mut() {
-        *pixel = 0x303030;
-    }
-
-    // 绘制标题
-    draw_text(buffer, "FD2 Animation Player", 10, 10, 0xFFFFFF);
-    draw_text(buffer, "Double-click select | S=Save | ESC=Exit", 10, 25, 0xAAAAAA);
-
-    // 绘制动画列表
-    let list_x = 10;
-    let list_y = 40;
-    let item_height = 28;
-
-    for i in 0..ANIMATION_NAMES.len().min(9) {
-        let y = list_y + i * item_height;
-        let is_selected = i == current_afm;
-        let is_hovered = hovered_item == Some(i);
-        let is_save_hovered = hovered_save_btn == Some(i);
-
-        let bg_color = if is_selected {
-            0x004488
-        } else if is_hovered {
-            0x444444
-        } else {
-            0x383838
-        };
-        fill_rect(buffer, list_x, y, 200, item_height - 2, bg_color);
-
-        let text_color = if is_selected { 0xFFFFFF } else { 0xCCCCCC };
-        draw_text(buffer, ANIMATION_NAMES[i], list_x + 5, y + 8, text_color);
-
-        let btn_x = list_x + 205;
-        let btn_color = if is_save_hovered { 0x00AA00 } else { 0x006600 };
-        fill_rect(buffer, btn_x, y, 60, item_height - 2, btn_color);
-        draw_text(buffer, "Save", btn_x + 15, y + 8, 0xFFFFFF);
-    }
-
-    // 绘制动画预览区域
-    let preview_x = 290;
-    let preview_y = 40;
-    let preview_scale = 2;
-
-    fill_rect(buffer, preview_x, preview_y, ANI_WIDTH * preview_scale, ANI_HEIGHT * preview_scale, 0x000000);
-    draw_frame_scaled(buffer, preview_x, preview_y, frame_data, palette, preview_scale);
-    draw_text(buffer, &format!("Frame: {}/{}", current_frame + 1, total_frames), preview_x, preview_y + ANI_HEIGHT * preview_scale + 10, 0xFFFFFF);
-
-    // 状态消息
-    if show_status && !status_message.is_empty() {
-        let msg_width = status_message.len() * 8;
-        let msg_x = (SCREEN_WIDTH - msg_width) / 2;
-        let msg_y = SCREEN_HEIGHT - 40;
-        fill_rect(buffer, msg_x - 10, msg_y - 5, msg_width + 20, 25, 0x006600);
-        draw_text(buffer, status_message, msg_x, msg_y, 0xFFFFFF);
+fn render_frame(buffer: &mut [u32], frame_data: &[u8], palette: &[u8; 768]) {
+    for (i, &pixel) in frame_data.iter().enumerate() {
+        let idx = pixel as usize * 3;
+        let r = (palette[idx] as u32 * 4).min(255);
+        let g = (palette[idx + 1] as u32 * 4).min(255);
+        let b = (palette[idx + 2] as u32 * 4).min(255);
+        buffer[i] = (r << 16) | (g << 8) | b;
     }
 }
 
-fn draw_frame_scaled(
-    buffer: &mut [u32],
-    offset_x: usize,
-    offset_y: usize,
-    frame_data: &[u8],
-    palette: &[u8; 768],
-    scale: usize,
-) {
-    for y in 0..ANI_HEIGHT {
+fn draw_status_bar(buffer: &mut [u32], message: &str) {
+    let y_start = ANI_HEIGHT - 16;
+    for y in y_start..ANI_HEIGHT {
         for x in 0..ANI_WIDTH {
-            let pixel = frame_data[y * ANI_WIDTH + x];
-            let idx = pixel as usize * 3;
-            let r = (palette[idx] as u32 * 4).min(255);
-            let g = (palette[idx + 1] as u32 * 4).min(255);
-            let b = (palette[idx + 2] as u32 * 4).min(255);
-            let color = (r << 16) | (g << 8) | b;
+            buffer[y * ANI_WIDTH + x] = 0x002200;
+        }
+    }
 
-            for sy in 0..scale {
-                for sx in 0..scale {
-                    let px = offset_x + x * scale + sx;
-                    let py = offset_y + y * scale + sy;
-                    if px < SCREEN_WIDTH && py < SCREEN_HEIGHT {
-                        buffer[py * SCREEN_WIDTH + px] = color;
+    let chars: Vec<char> = message.chars().collect();
+    for (i, &ch) in chars.iter().enumerate() {
+        if i >= 38 {
+            break;
+        }
+        let x = 4 + i * 8;
+        draw_char(buffer, ch, x, y_start + 4, 0xFFFFFF);
+    }
+}
+
+fn draw_char(buffer: &mut [u32], ch: char, x: usize, y: usize, color: u32) {
+    static FONT: [[u8; 8]; 128] = {
+        let mut font = [[0u8; 8]; 128];
+        font[48] = [0x3C, 0x42, 0x42, 0x42, 0x42, 0x42, 0x3C, 0x00]; // 0
+        font[49] = [0x08, 0x18, 0x28, 0x08, 0x08, 0x08, 0x3E, 0x00]; // 1
+        font[50] = [0x3C, 0x42, 0x02, 0x0C, 0x30, 0x40, 0x7E, 0x00]; // 2
+        font[51] = [0x3C, 0x42, 0x02, 0x1C, 0x02, 0x42, 0x3C, 0x00]; // 3
+        font[52] = [0x04, 0x0C, 0x14, 0x24, 0x7E, 0x04, 0x04, 0x00]; // 4
+        font[53] = [0x7E, 0x40, 0x7C, 0x02, 0x02, 0x42, 0x3C, 0x00]; // 5
+        font[54] = [0x1C, 0x20, 0x40, 0x7C, 0x42, 0x42, 0x3C, 0x00]; // 6
+        font[55] = [0x7E, 0x02, 0x04, 0x08, 0x10, 0x10, 0x10, 0x00]; // 7
+        font[56] = [0x3C, 0x42, 0x42, 0x3C, 0x42, 0x42, 0x3C, 0x00]; // 8
+        font[57] = [0x3C, 0x42, 0x42, 0x3E, 0x02, 0x04, 0x38, 0x00]; // 9
+        font[65] = [0x10, 0x28, 0x44, 0x44, 0x7C, 0x44, 0x44, 0x00]; // A
+        font[66] = [0x78, 0x44, 0x44, 0x78, 0x44, 0x44, 0x78, 0x00]; // B
+        font[67] = [0x3C, 0x44, 0x40, 0x40, 0x40, 0x44, 0x3C, 0x00]; // C
+        font[68] = [0x78, 0x44, 0x44, 0x44, 0x44, 0x44, 0x78, 0x00]; // D
+        font[69] = [0x7C, 0x40, 0x40, 0x78, 0x40, 0x40, 0x7C, 0x00]; // E
+        font[70] = [0x7C, 0x40, 0x40, 0x78, 0x40, 0x40, 0x40, 0x00]; // F
+        font[71] = [0x3C, 0x44, 0x40, 0x4E, 0x44, 0x44, 0x3E, 0x00]; // G
+        font[72] = [0x44, 0x44, 0x44, 0x7C, 0x44, 0x44, 0x44, 0x00]; // H
+        font[73] = [0x38, 0x10, 0x10, 0x10, 0x10, 0x10, 0x38, 0x00]; // I
+        font[74] = [0x04, 0x04, 0x04, 0x04, 0x04, 0x44, 0x38, 0x00]; // J
+        font[75] = [0x44, 0x48, 0x50, 0x60, 0x50, 0x48, 0x44, 0x00]; // K
+        font[76] = [0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x7C, 0x00]; // L
+        font[77] = [0x44, 0x6C, 0x54, 0x44, 0x44, 0x44, 0x44, 0x00]; // M
+        font[78] = [0x44, 0x64, 0x54, 0x4C, 0x44, 0x44, 0x44, 0x00]; // N
+        font[79] = [0x38, 0x44, 0x44, 0x44, 0x44, 0x44, 0x38, 0x00]; // O
+        font[80] = [0x78, 0x44, 0x44, 0x78, 0x40, 0x40, 0x40, 0x00]; // P
+        font[81] = [0x38, 0x44, 0x44, 0x44, 0x54, 0x48, 0x34, 0x00]; // Q
+        font[82] = [0x78, 0x44, 0x44, 0x78, 0x48, 0x44, 0x44, 0x00]; // R
+        font[83] = [0x3C, 0x44, 0x40, 0x3C, 0x04, 0x44, 0x3C, 0x00]; // S
+        font[84] = [0x7C, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x00]; // T
+        font[85] = [0x44, 0x44, 0x44, 0x44, 0x44, 0x44, 0x38, 0x00]; // U
+        font[86] = [0x44, 0x44, 0x44, 0x44, 0x44, 0x28, 0x10, 0x00]; // V
+        font[87] = [0x44, 0x44, 0x44, 0x54, 0x54, 0x6C, 0x44, 0x00]; // W
+        font[88] = [0x44, 0x28, 0x10, 0x10, 0x10, 0x28, 0x44, 0x00]; // X
+        font[89] = [0x44, 0x44, 0x28, 0x10, 0x10, 0x10, 0x10, 0x00]; // Y
+        font[90] = [0x7C, 0x04, 0x08, 0x10, 0x20, 0x40, 0x7C, 0x00]; // Z
+        font[32] = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]; // space
+        font[45] = [0x00, 0x00, 0x00, 0x7C, 0x00, 0x00, 0x00, 0x00]; // -
+        font[58] = [0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00, 0x00]; // :
+        font[46] = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x00]; // .
+        font
+    };
+
+    let code = ch as usize;
+    if code < 128 {
+        let glyph = FONT[code];
+        for (row, &bits) in glyph.iter().enumerate() {
+            for col in 0..8 {
+                if (bits & (0x80 >> col)) != 0 {
+                    let px = x + col;
+                    let py = y + row;
+                    if px < ANI_WIDTH && py < ANI_HEIGHT {
+                        buffer[py * ANI_WIDTH + px] = color;
                     }
                 }
             }
         }
-    }
-}
-
-fn fill_rect(buffer: &mut [u32], x: usize, y: usize, w: usize, h: usize, color: u32) {
-    for py in y..y.saturating_add(h).min(SCREEN_HEIGHT) {
-        for px in x..x.saturating_add(w).min(SCREEN_WIDTH) {
-            buffer[py * SCREEN_WIDTH + px] = color;
-        }
-    }
-}
-
-// 简单位图字体数据 (8x8)
-static FONT: [[u8; 8]; 128] = {
-    let mut font = [[0u8; 8]; 128];
-    // 空格
-    font[32] = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
-    // 数字 0-9
-    font[48] = [0x3C, 0x42, 0x42, 0x42, 0x42, 0x42, 0x3C, 0x00];
-    font[49] = [0x08, 0x18, 0x28, 0x08, 0x08, 0x08, 0x3E, 0x00];
-    font[50] = [0x3C, 0x42, 0x02, 0x0C, 0x30, 0x40, 0x7E, 0x00];
-    font[51] = [0x3C, 0x42, 0x02, 0x1C, 0x02, 0x42, 0x3C, 0x00];
-    font[52] = [0x04, 0x0C, 0x14, 0x24, 0x7E, 0x04, 0x04, 0x00];
-    font[53] = [0x7E, 0x40, 0x7C, 0x02, 0x02, 0x42, 0x3C, 0x00];
-    font[54] = [0x1C, 0x20, 0x40, 0x7C, 0x42, 0x42, 0x3C, 0x00];
-    font[55] = [0x7E, 0x02, 0x04, 0x08, 0x10, 0x10, 0x10, 0x00];
-    font[56] = [0x3C, 0x42, 0x42, 0x3C, 0x42, 0x42, 0x3C, 0x00];
-    font[57] = [0x3C, 0x42, 0x42, 0x3E, 0x02, 0x04, 0x38, 0x00];
-    // A-Z
-    font[65] = [0x10, 0x28, 0x44, 0x44, 0x7C, 0x44, 0x44, 0x00];
-    font[66] = [0x78, 0x44, 0x44, 0x78, 0x44, 0x44, 0x78, 0x00];
-    font[67] = [0x3C, 0x44, 0x40, 0x40, 0x40, 0x44, 0x3C, 0x00];
-    font[68] = [0x78, 0x44, 0x44, 0x44, 0x44, 0x44, 0x78, 0x00];
-    font[69] = [0x7C, 0x40, 0x40, 0x78, 0x40, 0x40, 0x7C, 0x00];
-    font[70] = [0x7C, 0x40, 0x40, 0x78, 0x40, 0x40, 0x40, 0x00];
-    font[71] = [0x3C, 0x44, 0x40, 0x4E, 0x44, 0x44, 0x3E, 0x00];
-    font[72] = [0x44, 0x44, 0x44, 0x7C, 0x44, 0x44, 0x44, 0x00];
-    font[73] = [0x38, 0x10, 0x10, 0x10, 0x10, 0x10, 0x38, 0x00];
-    font[74] = [0x04, 0x04, 0x04, 0x04, 0x04, 0x44, 0x38, 0x00];
-    font[75] = [0x44, 0x48, 0x50, 0x60, 0x50, 0x48, 0x44, 0x00];
-    font[76] = [0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x7C, 0x00];
-    font[77] = [0x44, 0x6C, 0x54, 0x44, 0x44, 0x44, 0x44, 0x00];
-    font[78] = [0x44, 0x64, 0x54, 0x4C, 0x44, 0x44, 0x44, 0x00];
-    font[79] = [0x38, 0x44, 0x44, 0x44, 0x44, 0x44, 0x38, 0x00];
-    font[80] = [0x78, 0x44, 0x44, 0x78, 0x40, 0x40, 0x40, 0x00];
-    font[81] = [0x38, 0x44, 0x44, 0x44, 0x54, 0x48, 0x34, 0x00];
-    font[82] = [0x78, 0x44, 0x44, 0x78, 0x48, 0x44, 0x44, 0x00];
-    font[83] = [0x3C, 0x44, 0x40, 0x3C, 0x04, 0x44, 0x3C, 0x00];
-    font[84] = [0x7C, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x00];
-    font[85] = [0x44, 0x44, 0x44, 0x44, 0x44, 0x44, 0x38, 0x00];
-    font[86] = [0x44, 0x44, 0x44, 0x44, 0x44, 0x28, 0x10, 0x00];
-    font[87] = [0x44, 0x44, 0x44, 0x54, 0x54, 0x6C, 0x44, 0x00];
-    font[88] = [0x44, 0x28, 0x10, 0x10, 0x10, 0x28, 0x44, 0x00];
-    font[89] = [0x44, 0x44, 0x28, 0x10, 0x10, 0x10, 0x10, 0x00];
-    font[90] = [0x7C, 0x04, 0x08, 0x10, 0x20, 0x40, 0x7C, 0x00];
-    // 特殊字符
-    font[45] = [0x00, 0x00, 0x00, 0x7C, 0x00, 0x00, 0x00, 0x00];
-    font[47] = [0x04, 0x08, 0x08, 0x10, 0x10, 0x20, 0x20, 0x00];
-    font[58] = [0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00, 0x00];
-    font[97] = [0x00, 0x00, 0x3C, 0x04, 0x3C, 0x44, 0x3C, 0x00]; // a
-    font[101] = [0x00, 0x00, 0x3C, 0x44, 0x7C, 0x40, 0x3C, 0x00]; // e
-    font[105] = [0x00, 0x10, 0x00, 0x10, 0x10, 0x10, 0x10, 0x00]; // i
-    font[111] = [0x00, 0x00, 0x3C, 0x44, 0x44, 0x44, 0x3C, 0x00]; // o
-    font[117] = [0x00, 0x00, 0x44, 0x44, 0x44, 0x44, 0x3C, 0x00]; // u
-    font[118] = [0x00, 0x00, 0x44, 0x44, 0x44, 0x28, 0x10, 0x00]; // v
-    font[100] = [0x04, 0x04, 0x3C, 0x44, 0x44, 0x44, 0x3C, 0x00]; // d
-    font[110] = [0x00, 0x00, 0x5C, 0x62, 0x42, 0x42, 0x42, 0x00]; // n
-    font[115] = [0x00, 0x00, 0x3C, 0x40, 0x3C, 0x04, 0x3C, 0x00]; // s
-    font[116] = [0x10, 0x10, 0x38, 0x10, 0x10, 0x10, 0x08, 0x00]; // t
-    font[108] = [0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x00]; // l
-    font[99] = [0x00, 0x00, 0x3C, 0x40, 0x40, 0x40, 0x3C, 0x00]; // c
-    font[114] = [0x00, 0x00, 0x5C, 0x60, 0x40, 0x40, 0x40, 0x00]; // r
-    font[102] = [0x08, 0x10, 0x38, 0x10, 0x10, 0x10, 0x08, 0x00]; // f
-    font[109] = [0x00, 0x00, 0x76, 0x49, 0x49, 0x49, 0x49, 0x00]; // m
-    font[112] = [0x00, 0x00, 0x78, 0x44, 0x44, 0x44, 0x78, 0x40]; // p
-    font[98] = [0x00, 0x00, 0x78, 0x44, 0x44, 0x44, 0x78, 0x00]; // b
-    font[103] = [0x00, 0x00, 0x3C, 0x44, 0x44, 0x3C, 0x04, 0x00]; // g
-    font[104] = [0x40, 0x40, 0x5C, 0x62, 0x42, 0x42, 0x42, 0x00]; // h
-    font[107] = [0x40, 0x40, 0x4C, 0x50, 0x48, 0x44, 0x40, 0x00]; // k
-    font[119] = [0x00, 0x00, 0x44, 0x6C, 0x54, 0x44, 0x44, 0x00]; // w
-    font[120] = [0x00, 0x00, 0x44, 0x28, 0x10, 0x28, 0x44, 0x00]; // x
-    font[121] = [0x00, 0x00, 0x44, 0x28, 0x10, 0x10, 0x10, 0x00]; // y
-    font[122] = [0x00, 0x00, 0x7C, 0x08, 0x10, 0x20, 0x7C, 0x00]; // z
-    font
-};
-
-fn draw_text(buffer: &mut [u32], text: &str, x: usize, y: usize, color: u32) {
-    let mut cx = x;
-    for ch in text.chars() {
-        let code = ch as usize;
-        if code < 128 {
-            let glyph = FONT[code];
-            for (row, &bits) in glyph.iter().enumerate() {
-                for col in 0..8 {
-                    if (bits & (0x80 >> col)) != 0 {
-                        let px = cx + col;
-                        let py = y + row;
-                        if px < SCREEN_WIDTH && py < SCREEN_HEIGHT {
-                            buffer[py * SCREEN_WIDTH + px] = color;
-                        }
-                    }
-                }
-            }
-        }
-        cx += 8;
     }
 }
 
@@ -554,12 +412,7 @@ fn decode_afm(data: &[u8], afm_offset: usize) -> (Vec<Vec<u8>>, Vec<[u8; 768]>) 
     (frames, palettes)
 }
 
-fn process_frame(
-    param: usize,
-    frame_data: &[u8],
-    palette_buf: &mut [u8],
-    pixel_buf: &mut [u8],
-) {
+fn process_frame(param: usize, frame_data: &[u8], palette_buf: &mut [u8], pixel_buf: &mut [u8]) {
     if param == 0 || frame_data.is_empty() {
         return;
     }

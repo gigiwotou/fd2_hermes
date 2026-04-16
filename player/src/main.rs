@@ -26,8 +26,32 @@ fn main() {
     let ani_path = if args.len() > 1 {
         args[1].clone()
     } else {
-        "../game/ANI.DAT".to_string()
+        // 尝试多个可能的路径
+        let possible_paths = vec![
+            "../game/ANI.DAT",
+            "game/ANI.DAT",
+            "ANI.DAT",
+            "/home/yinming/fd2_dat/game/ANI.DAT",
+        ];
+        
+        let mut found = String::new();
+        for path in &possible_paths {
+            if std::path::Path::new(path).exists() {
+                found = path.to_string();
+                break;
+            }
+        }
+        
+        if found.is_empty() {
+            eprintln!("Cannot find ANI.DAT");
+            eprintln!("Usage: fd2_player [ANI.DAT path]");
+            eprintln!("Tried paths: {:?}", possible_paths);
+            return;
+        }
+        found
     };
+
+    eprintln!("Loading: {}", ani_path);
 
     // 读取 ANI.DAT
     let mut file = match File::open(&ani_path) {

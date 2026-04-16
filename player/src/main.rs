@@ -12,15 +12,15 @@ const LIST_WIDTH: usize = 100;  // 播放列表宽度（像素，会随 scale �
 const LIST_X: usize = ANI_WIDTH;  // 播放列表起始位置
 
 const ANIMATION_NAMES: &[&str] = &[
-    "0:Opening",
-    "1:Battle",
-    "2:Character",
-    "3:Effect",
-    "4:Item",
-    "5:Transition",
-    "6:Interface",
-    "7:Title",
-    "8:Ending",
+    "1:Opening",
+    "2:Battle",
+    "3:Character",
+    "4:Effect",
+    "5:Item",
+    "6:Transition",
+    "7:Interface",
+    "8:Title",
+    "9:Ending",
 ];
 
 fn main() {
@@ -138,7 +138,7 @@ fn main() {
     println!("  [ESC]        : Exit");
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
-        // 动画选择
+        // 动画选择 (数字键 1-9)
         let num_keys = [Key::Key1, Key::Key2, Key::Key3, Key::Key4, Key::Key5,
                        Key::Key6, Key::Key7, Key::Key8, Key::Key9];
         for (i, &key) in num_keys.iter().enumerate() {
@@ -153,7 +153,27 @@ fn main() {
             }
         }
 
-        // 左右切换
+        // 上下箭头切换
+        if window.is_key_pressed(Key::Up, minifb::KeyRepeat::No) {
+            if current_afm > 0 {
+                current_afm -= 1;
+                current_frame = 0;
+                frame_counter = 0;
+                status_message = format!("Selected: {}", ANIMATION_NAMES[current_afm]);
+                status_counter = 60;
+            }
+        }
+        if window.is_key_pressed(Key::Down, minifb::KeyRepeat::No) {
+            if current_afm < all_animations.len() - 1 {
+                current_afm += 1;
+                current_frame = 0;
+                frame_counter = 0;
+                status_message = format!("Selected: {}", ANIMATION_NAMES[current_afm]);
+                status_counter = 60;
+            }
+        }
+
+        // 左右箭头切换 (保留)
         if window.is_key_pressed(Key::Left, minifb::KeyRepeat::No) {
             if current_afm > 0 {
                 current_afm -= 1;
@@ -260,20 +280,19 @@ fn render_frame_to_buffer(
 
 fn draw_playlist(buffer: &mut [u32], buf_width: usize, buf_height: usize, selected: usize, total: usize) {
     let list_x = ANI_WIDTH;
-    let item_height = 20;
-    let padding = 2;
+    let item_height = 18;  // 减小高度
 
     // 标题
-    draw_text(buffer, buf_width, buf_height, "Playlist", list_x + 4, 4, 0xFFFFFF);
+    draw_text(buffer, buf_width, buf_height, "Playlist", list_x + 4, 2, 0xFFFFFF);
 
     // 分隔线
     for x in list_x..buf_width {
-        buffer[14 * buf_width + x] = 0x555555;
+        buffer[12 * buf_width + x] = 0x555555;
     }
 
     // 动画列表
     for i in 0..total.min(9) {
-        let y = 18 + i * item_height;
+        let y = 14 + i * item_height;
         
         // 选中项背景
         if i == selected {
@@ -290,12 +309,12 @@ fn draw_playlist(buffer: &mut [u32], buf_width: usize, buf_height: usize, select
 
         // 动画名称
         let color = if i == selected { 0xFFFF00 } else { 0xAAAAAA };
-        draw_text(buffer, buf_width, buf_height, ANIMATION_NAMES[i], list_x + 4, y + 4, color);
+        draw_text(buffer, buf_width, buf_height, ANIMATION_NAMES[i], list_x + 4, y + 2, color);
     }
 
-    // 保存提示
-    let save_y = buf_height - 20;
-    draw_text(buffer, buf_width, buf_height, "[S] Save GIF", list_x + 4, save_y, 0x00CC00);
+    // 保存提示 - 放在列表底部
+    let save_y = 14 + 9 * item_height + 4;
+    draw_text(buffer, buf_width, buf_height, "[S] Save", list_x + 4, save_y, 0x00CC00);
 }
 
 fn draw_status_bar(buffer: &mut [u32], buf_width: usize, buf_height: usize, message: &str) {

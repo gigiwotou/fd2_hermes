@@ -26,29 +26,30 @@ fn main() {
     let ani_path = if args.len() > 1 {
         args[1].clone()
     } else {
-        // 尝试多个可能的路径
-        let possible_paths = vec![
-            "../game/ANI.DAT",
-            "game/ANI.DAT",
-            "ANI.DAT",
-            "/home/yinming/fd2_dat/game/ANI.DAT",
-        ];
-        
-        let mut found = String::new();
-        for path in &possible_paths {
-            if std::path::Path::new(path).exists() {
-                found = path.to_string();
-                break;
+        // 只从同目录寻找 ANI.DAT
+        if std::path::Path::new("ANI.DAT").exists() {
+            "ANI.DAT".to_string()
+        } else {
+            // 显示图形化错误消息
+            let mut error_window = Window::new(
+                "Error - ANI.DAT not found",
+                400,
+                150,
+                WindowOptions::default(),
+            ).unwrap();
+            
+            let mut buffer = vec![0x303030u32; 400 * 150];
+            draw_text(&mut buffer, "Error: ANI.DAT not found!", 80, 40, 0xFF4444);
+            draw_text(&mut buffer, "Please copy ANI.DAT to", 80, 70, 0xFFFFFF);
+            draw_text(&mut buffer, "the same directory as", 80, 90, 0xFFFFFF);
+            draw_text(&mut buffer, "fd2_player executable", 80, 110, 0xFFFFFF);
+            
+            while error_window.is_open() && !error_window.is_key_down(Key::Escape) {
+                error_window.update_with_buffer(&buffer, 400, 150).unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(50));
             }
-        }
-        
-        if found.is_empty() {
-            eprintln!("Cannot find ANI.DAT");
-            eprintln!("Usage: fd2_player [ANI.DAT path]");
-            eprintln!("Tried paths: {:?}", possible_paths);
             return;
         }
-        found
     };
 
     eprintln!("Loading: {}", ani_path);

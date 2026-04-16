@@ -128,11 +128,11 @@ RGB_8bit = min(255, RGB_6bit × 4)
 
 ## 文件位置
 
-- 游戏数据: `/home/yinming/fd2_hermes/game/ANI.DAT`
-- 解码工具: `/home/yinming/fd2_hermes/tools/decode_afm_fixed.py`
-- 输出动画: `/home/yinming/fd2_hermes/docs/afm_animations/`
+- 游戏数据: `game/ANI.DAT`
+- 解码工具: `tools/decode_afm_fixed.py`
+- 输出动画: `docs/afm_animations/`
 
 ## 参考
 
-- IDA Pro 反编译代码: `/home/yinming/fd2_dat2/tools/export-for-ai/decompile/`
+- IDA Pro 反编译代码: `tools/export-for-ai/decompile/`
 - 关键函数: `sub_36FF4` (帧处理), `sub_36F69` (命令0x07), `sub_36F82` (命令0x08), `sub_36FAC` (命令0x09)

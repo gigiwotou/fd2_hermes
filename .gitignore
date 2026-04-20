@@ -4,11 +4,11 @@ game/
 # 保留文本文件
 
 # 调试脚本和临时文件
-
+/extracted
 
 # 生成的动画和图像
 docs/afm_animations/
-
+docs/fdother_extracted/
 # 保留目录结构
 
 

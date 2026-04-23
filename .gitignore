@@ -5,10 +5,14 @@ game/
 
 # 调试脚本和临时文件
 /extracted
+/tools/export-for-ai
+/parsers
 
 # 生成的动画和图像
 docs/afm_animations/
 docs/fdother_extracted/
+decoded*/
+
 # 保留目录结构
 
 

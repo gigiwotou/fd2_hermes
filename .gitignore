@@ -7,6 +7,7 @@ game/
 /extracted
 /tools/export-for-ai
 /parsers
+/resources
 
 # 生成的动画和图像
 docs/afm_animations/

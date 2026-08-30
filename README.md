@@ -33,6 +33,22 @@ fd2_hermes/
 3. **命令 0x09**: 从帧数据复制到像素缓冲区，不是缓冲区内部复制
 4. **调色板**: DOS 6-bit 格式，需要 ×4 转换
 
+## 动画预览
+
+下面是从 ANI.DAT 中解码出来的 AFM 动画 GIF 预览，位于 `docs/afm_animations/`：
+
+<p align="center">
+  <img src="docs/afm_animations/afm_0.gif" width="160" alt="afm_0" />
+  <img src="docs/afm_animations/afm_1.gif" width="160" alt="afm_1" />
+  <img src="docs/afm_animations/afm_2.gif" width="160" alt="afm_2" />
+  <img src="docs/afm_animations/afm_3.gif" width="160" alt="afm_3" />
+  <img src="docs/afm_animations/afm_4.gif" width="160" alt="afm_4" />
+  <img src="docs/afm_animations/afm_5.gif" width="160" alt="afm_5" />
+  <img src="docs/afm_animations/afm_6.gif" width="160" alt="afm_6" />
+  <img src="docs/afm_animations/afm_7.gif" width="160" alt="afm_7" />
+  <img src="docs/afm_animations/afm_8.gif" width="160" alt="afm_8" />
+</p>
+
 ## 工具使用
 
 ```bash
